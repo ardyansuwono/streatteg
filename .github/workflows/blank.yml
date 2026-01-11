@@ -35,36 +35,32 @@ jobs:
 
       - name: Start Streaming with Watermark
         env:
-          # Input manual run:
           INPUT_URL: ${{ inputs.INPUT_URL }}
           REFERER_HEADER: ${{ inputs.REFERER_HEADER }}
-          USER_AGENT: ${{ inputs.USER_AGENT }}
           ORIGIN_HEADER: ${{ inputs.ORIGIN_HEADER }}
+          USER_AGENT: ${{ inputs.USER_AGENT }}
 
-          # Secret only:
           RTMP_URL: ${{ secrets.RTMP_URL }}
         run: |
           set -euo pipefail
 
-          # --- Validasi ---
           if [ -z "${RTMP_URL:-}" ]; then
             echo "RTMP_URL belum diset di Secrets!"
             exit 1
           fi
 
-          # Masking (biar gak tampil kalau error)
           echo "::add-mask::$RTMP_URL"
 
-          # Siapkan opsi header hanya jika ada isinya
+          # Urutan header: Referer -> Origin -> User-Agent
           HEADERS=()
           if [ -n "$REFERER_HEADER" ]; then
             HEADERS+=(--http-header "Referer=$REFERER_HEADER")
           fi
-          if [ -n "$USER_AGENT" ]; then
-            HEADERS+=(--http-header "User-Agent=$USER_AGENT")
-          fi
           if [ -n "$ORIGIN_HEADER" ]; then
             HEADERS+=(--http-header "Origin=$ORIGIN_HEADER")
+          fi
+          if [ -n "$USER_AGENT" ]; then
+            HEADERS+=(--http-header "User-Agent=$USER_AGENT")
           fi
 
           echo "Starting stream..."
