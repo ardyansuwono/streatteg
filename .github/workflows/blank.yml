@@ -1,10 +1,10 @@
-name: Streamlink to Telegram RTMP with Watermark
+name: FFmpeg HLS to Telegram RTMP with Watermark
 
 on:
   workflow_dispatch:
     inputs:
       INPUT_URL:
-        description: "URL stream (HLS/m3u8, dll)"
+        description: "URL HLS (m3u8)"
         required: true
         type: string
       REFERER_HEADER:
@@ -28,18 +28,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up Streamlink and FFmpeg
+      - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg streamlink
+          sudo apt-get install -y ffmpeg
 
-      - name: Start Streaming with Watermark
+      - name: Start Streaming (FFmpeg only)
         env:
           INPUT_URL: ${{ inputs.INPUT_URL }}
           REFERER_HEADER: ${{ inputs.REFERER_HEADER }}
           ORIGIN_HEADER: ${{ inputs.ORIGIN_HEADER }}
           USER_AGENT: ${{ inputs.USER_AGENT }}
-
           RTMP_URL: ${{ secrets.RTMP_URL }}
         run: |
           set -euo pipefail
@@ -51,22 +50,24 @@ jobs:
 
           echo "::add-mask::$RTMP_URL"
 
-          # Urutan header: Referer -> Origin -> User-Agent
-          HEADERS=()
+          # Gabungkan header (urut: Referer -> Origin -> UA)
+          HDR=""
           if [ -n "$REFERER_HEADER" ]; then
-            HEADERS+=(--http-header "Referer=$REFERER_HEADER")
+            HDR="${HDR}Referer: ${REFERER_HEADER}\r\n"
           fi
           if [ -n "$ORIGIN_HEADER" ]; then
-            HEADERS+=(--http-header "Origin=$ORIGIN_HEADER")
+            HDR="${HDR}Origin: ${ORIGIN_HEADER}\r\n"
           fi
           if [ -n "$USER_AGENT" ]; then
-            HEADERS+=(--http-header "User-Agent=$USER_AGENT")
+            HDR="${HDR}User-Agent: ${USER_AGENT}\r\n"
           fi
 
-          echo "Starting stream..."
-          streamlink "${HEADERS[@]}" \
-            "$INPUT_URL" best --stdout | \
-          ffmpeg -hide_banner -loglevel warning -re -i - \
+          echo "Starting FFmpeg streaming..."
+          ffmpeg -hide_banner -loglevel info \
+            -re \
+            -headers "$HDR" \
+            -i "$INPUT_URL" \
             -vf "drawtext=text='TipiStream':fontcolor=white:fontsize=24:x=180:y=180" \
-            -c:v libx264 -preset veryfast -c:a aac -b:a 64k \
+            -c:v libx264 -preset veryfast -tune zerolatency \
+            -c:a aac -b:a 128k -ar 44100 \
             -f flv "$RTMP_URL"
