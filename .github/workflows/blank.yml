@@ -1,0 +1,76 @@
+name: Streamlink to Telegram RTMP with Watermark
+
+on:
+  workflow_dispatch:
+    inputs:
+      INPUT_URL:
+        description: "URL stream (HLS/m3u8, dll)"
+        required: true
+        type: string
+      REFERER_HEADER:
+        description: "Referer header (optional)"
+        required: false
+        type: string
+        default: ""
+      ORIGIN_HEADER:
+        description: "Origin header (optional)"
+        required: false
+        type: string
+        default: ""
+      USER_AGENT:
+        description: "User-Agent header (optional)"
+        required: false
+        type: string
+        default: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Streamlink and FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg streamlink
+
+      - name: Start Streaming with Watermark
+        env:
+          # Input manual run:
+          INPUT_URL: ${{ inputs.INPUT_URL }}
+          REFERER_HEADER: ${{ inputs.REFERER_HEADER }}
+          USER_AGENT: ${{ inputs.USER_AGENT }}
+          ORIGIN_HEADER: ${{ inputs.ORIGIN_HEADER }}
+
+          # Secret only:
+          RTMP_URL: ${{ secrets.RTMP_URL }}
+        run: |
+          set -euo pipefail
+
+          # --- Validasi ---
+          if [ -z "${RTMP_URL:-}" ]; then
+            echo "RTMP_URL belum diset di Secrets!"
+            exit 1
+          fi
+
+          # Masking (biar gak tampil kalau error)
+          echo "::add-mask::$RTMP_URL"
+
+          # Siapkan opsi header hanya jika ada isinya
+          HEADERS=()
+          if [ -n "$REFERER_HEADER" ]; then
+            HEADERS+=(--http-header "Referer=$REFERER_HEADER")
+          fi
+          if [ -n "$USER_AGENT" ]; then
+            HEADERS+=(--http-header "User-Agent=$USER_AGENT")
+          fi
+          if [ -n "$ORIGIN_HEADER" ]; then
+            HEADERS+=(--http-header "Origin=$ORIGIN_HEADER")
+          fi
+
+          echo "Starting stream..."
+          streamlink "${HEADERS[@]}" \
+            "$INPUT_URL" best --stdout | \
+          ffmpeg -hide_banner -loglevel warning -re -i - \
+            -vf "drawtext=text='TipiStream':fontcolor=white:fontsize=24:x=180:y=180" \
+            -c:v libx264 -preset veryfast -c:a aac -b:a 64k \
+            -f flv "$RTMP_URL"
