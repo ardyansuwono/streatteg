@@ -8,17 +8,17 @@ on:
         required: true
         type: string
       REFERER_HEADER:
-        description: "Referer header (optional)"
+        description: "Referer (optional)"
         required: false
         type: string
         default: ""
       ORIGIN_HEADER:
-        description: "Origin header (optional)"
+        description: "Origin (optional)"
         required: false
         type: string
         default: ""
       USER_AGENT:
-        description: "User-Agent header (optional)"
+        description: "User-Agent (optional)"
         required: false
         type: string
         default: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
@@ -31,15 +31,19 @@ jobs:
       - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg curl
 
-      - name: Start Streaming (FFmpeg only)
+      - name: Start Streaming (FFmpeg)
         env:
           INPUT_URL: ${{ inputs.INPUT_URL }}
           REFERER_HEADER: ${{ inputs.REFERER_HEADER }}
           ORIGIN_HEADER: ${{ inputs.ORIGIN_HEADER }}
           USER_AGENT: ${{ inputs.USER_AGENT }}
+
           RTMP_URL: ${{ secrets.RTMP_URL }}
+
+          # optional cookie secret
+          HLS_COOKIE: ${{ secrets.HLS_COOKIE }}
         run: |
           set -euo pipefail
 
@@ -47,25 +51,34 @@ jobs:
             echo "RTMP_URL belum diset di Secrets!"
             exit 1
           fi
-
           echo "::add-mask::$RTMP_URL"
 
-          # Gabungkan header (urut: Referer -> Origin -> UA)
-          HDR=""
-          if [ -n "$REFERER_HEADER" ]; then
-            HDR="${HDR}Referer: ${REFERER_HEADER}\r\n"
-          fi
+          # EXTRA headers only (avoid Referer/UA here)
+          EXTRA_HDR="Accept: */*\r\nAccept-Language: en-US,en;q=0.9\r\nConnection: keep-alive\r\n"
+
+          # Origin via headers (native option doesn't exist)
           if [ -n "$ORIGIN_HEADER" ]; then
-            HDR="${HDR}Origin: ${ORIGIN_HEADER}\r\n"
-          fi
-          if [ -n "$USER_AGENT" ]; then
-            HDR="${HDR}User-Agent: ${USER_AGENT}\r\n"
+            EXTRA_HDR="${EXTRA_HDR}Origin: ${ORIGIN_HEADER}\r\n"
           fi
 
+          # Final CRLF
+          EXTRA_HDR="${EXTRA_HDR}\r\n"
+
+          echo "Checking access via curl (first 10 lines)..."
+          curl -I -L "$INPUT_URL" \
+            -A "$USER_AGENT" \
+            ${REFERER_HEADER:+-e "$REFERER_HEADER"} \
+            ${ORIGIN_HEADER:+-H "Origin: $ORIGIN_HEADER"} \
+            ${HLS_COOKIE:+-H "Cookie: $HLS_COOKIE"} \
+            | head -n 10 || true
+
           echo "Starting FFmpeg streaming..."
-          ffmpeg -hide_banner -loglevel info \
+          ffmpeg -hide_banner -loglevel warning \
             -re \
-            -headers "$HDR" \
+            -user_agent "$USER_AGENT" \
+            ${REFERER_HEADER:+-referer "$REFERER_HEADER"} \
+            ${HLS_COOKIE:+-cookies "$HLS_COOKIE"} \
+            -headers "$EXTRA_HDR" \
             -i "$INPUT_URL" \
             -vf "drawtext=text='TipiStream':fontcolor=white:fontsize=24:x=180:y=180" \
             -c:v libx264 -preset veryfast -tune zerolatency \
